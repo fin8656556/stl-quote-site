@@ -1,76 +1,159 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Upload STL for Instant Quote</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            text-align: center;
-            padding: 40px;
-            background: #f4f4f4;
-        }
-        h1 {
-            margin-bottom: 10px;
-        }
-        .upload-box {
-            background: white;
-            padding: 30px;
-            border-radius: 10px;
-            max-width: 500px;
-            margin: auto;
-            box-shadow: 0 0 10px rgba(0,0,0,0.1);
-        }
-        input {
-            margin-top: 20px;
-        }
-        .price {
-            margin-top: 20px;
-            font-size: 20px;
-            font-weight: bold;
-        }
-        button {
-            margin-top: 20px;
-            padding: 10px 20px;
-            background: black;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-    </style>
+  <title>Instant 3D Print Quote</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f4f4f4;
+      text-align: center;
+      padding: 30px;
+    }
+
+    #viewer {
+      width: 100%;
+      max-width: 600px;
+      height: 400px;
+      margin: auto;
+      background: #ffffff;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    select, input, button {
+      padding: 10px;
+      margin: 10px;
+      font-size: 16px;
+    }
+
+    .price {
+      font-size: 22px;
+      font-weight: bold;
+      margin-top: 20px;
+    }
+  </style>
 </head>
 <body>
 
-    <div class="upload-box">
-        <h1>Upload Your STL File</h1>
-        <p>Get an instant estimated price</p>
+<h1>Upload STL for Instant Quote</h1>
 
-        <input type="file" id="fileInput" accept=".stl" />
+<input type="file" id="fileInput" accept=".stl">
 
-        <div class="price" id="priceOutput"></div>
+<br>
 
-        <button onclick="calculatePrice()">Calculate Price</button>
-    </div>
+<select id="material">
+  <option value="15">PLA (£15/kg)</option>
+  <option value="20">TPU (£20/kg)</option>
+  <option value="18">PETG (£18/kg)</option>
+  <option value="19">ABS (£19/kg)</option>
+  <option value="19">ASA (£19/kg)</option>
+  <option value="25">Nylon (£25/kg)</option>
+  <option value="50">Nylon CF (£50/kg)</option>
+  <option value="50">Polycarbonate (£50/kg)</option>
+  <option value="19">Glow in Dark (£19/kg)</option>
+</select>
 
-    <script>
-        function calculatePrice() {
-            const file = document.getElementById('fileInput').files[0];
+<div id="viewer"></div>
 
-            if (!file) {
-                alert("Please upload an STL file.");
-                return;
-            }
+<button onclick="calculatePrice()">Calculate Price</button>
 
-            // Simple demo pricing logic
-            const fileSizeMB = file.size / (1024 * 1024);
-            const baseRate = 5; 
-            const price = (baseRate + (fileSizeMB * 2)).toFixed(2);
+<div class="price" id="priceOutput"></div>
 
-            document.getElementById('priceOutput').innerText =
-                "Estimated Price: £" + price;
-        }
-    </script>
+<script>
+let scene, camera, renderer, mesh;
+let volume = 0;
+
+function initViewer() {
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(75, 600/400, 0.1, 1000);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(600, 400);
+  document.getElementById("viewer").appendChild(renderer.domElement);
+
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(0, 1, 1).normalize();
+  scene.add(light);
+
+  camera.position.z = 100;
+
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  renderer.render(scene, camera);
+}
+
+document.getElementById('fileInput').addEventListener('change', function(event) {
+  const file = event.target.files[0];
+  const reader = new FileReader();
+
+  reader.onload = function(e) {
+    const loader = new THREE.STLLoader();
+    const geometry = loader.parse(e.target.result);
+
+    geometry.computeBoundingBox();
+    geometry.computeVertexNormals();
+
+    volume = calculateVolume(geometry);
+
+    if (mesh) scene.remove(mesh);
+
+    const material = new THREE.MeshStandardMaterial({ color: 0x0077ff });
+    mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+  };
+
+  reader.readAsArrayBuffer(file);
+});
+
+function calculateVolume(geometry) {
+  let vol = 0;
+  const pos = geometry.attributes.position.array;
+
+  for (let i = 0; i < pos.length; i += 9) {
+    const ax = pos[i], ay = pos[i+1], az = pos[i+2];
+    const bx = pos[i+3], by = pos[i+4], bz = pos[i+5];
+    const cx = pos[i+6], cy = pos[i+7], cz = pos[i+8];
+
+    vol += (
+      ax*by*cz + ay*bz*cx + az*bx*cy
+      - az*by*cx - ay*bx*cz - ax*bz*cy
+    );
+  }
+
+  return Math.abs(vol / 6) / 1000; // convert mm³ to cm³
+}
+
+function calculatePrice() {
+  if (volume === 0) {
+    alert("Upload an STL file first.");
+    return;
+  }
+
+  const materialPricePerKg = parseFloat(document.getElementById("material").value);
+  const materialPricePerGram = materialPricePerKg / 1000;
+
+  const density = 1.24; // average plastic density g/cm³
+  const infillFactor = 0.3; // 30% infill estimate
+
+  const grams = volume * density * infillFactor;
+
+  const filamentCost = grams * materialPricePerGram;
+
+  const finalPrice = filamentCost * 1.6; // 60% markup
+
+  document.getElementById("priceOutput").innerText =
+    "Estimated Price: £" + finalPrice.toFixed(2);
+}
+
+initViewer();
+</script>
 
 </body>
 </html>
